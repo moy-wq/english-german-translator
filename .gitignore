@@ -27,8 +27,6 @@ wheels/
 # Poetry
 .venv/
 poetry.toml
-poetry.lock
-
 
 # PyTorch / Machine Learning
 *.pt
@@ -47,7 +45,7 @@ lightning_logs/
 
 # Dados e Tokenizadores (Específico do Projeto)
 # Ignorar tudo dentro da pasta data, mas manter a pasta no repositório
-data/*
+data/data/*
 !data/.gitkeep
 
 # Jupyter Notebooks
