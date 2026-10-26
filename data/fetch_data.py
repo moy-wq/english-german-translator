@@ -1,4 +1,3 @@
-import pandas as pd
 import datasets
 
 df = datasets.load_dataset('bentrevett/multi30k')
