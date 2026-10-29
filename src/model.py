@@ -4,6 +4,8 @@ import torch.functional as F
 from jaxtyping import Float, jaxtyped, Bool
 from beartype import beartype as typechecker
 from einops import rearrange
+from math import sqrt
+import copy
 
 class MultiHeadedAttention(nn.Module):
     """
@@ -83,12 +85,38 @@ class PositionalEmbedding(nn.Module):
         return self.dropout(X + self.pos_embed[:X.size(1)])
         
 
+class LayerNorm(nn.Module):
+    
+    def __init__(self,features_d ,eps=1e-6):
+        super(nn.LayerNorm, self).__init__()
+
+        self.a_1: nn.Parameter = nn.Parameter(torch.ones(features_d))
+        self.b_2: nn.Parameter = nn.Parameter(torch.zeros(features_d))
+        self.features_d  = features_d
+        self.eps = eps
+    
+    @jaxtyped(typechecker=typechecker)
+    def forward(self, X: Float[torch.Tensor, "batch seq_len features"]):
+        mean = X.mean()
+        std = X.std()
+        norm_x = (X - mean) / self.eps + std
+        
+        return self.a_1 * norm_x + self.b_2
+
+
+def clone(module: nn.Linear, N: int)-> nn.ModuleList:
+    return nn.ModuleList([copy.deep_copy(module) for _ in range(N)])
+
 
 class TransformerEncoderLayer(nn.Module):
     pass
+
 
 class TransformerDecoderLayer(nn.Module):
     pass
 
 class NmtTransformer(nn.Module):
     pass
+
+
+
