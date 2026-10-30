@@ -244,18 +244,46 @@ class TransformerDecoder(nn.Module):
             x = layer(x, src_mask, tgt_mask, memory)
 
         return self.norm(x)
-        
+
+class Generator(nn.Module):
+
+    def __init__(self, d_model, vocab_size):
+        super(Generator, self).__init__()
+        self.proj = nn.Linear(d_model, vocab_size)
+
+    def forward(self, X):
+        logits = self.proj(X)
+        return logits 
+    
 class NmtTransformer(nn.Module):
 
-    def __init__(self, encoder: nn.Module, decoder: nn.Module, src_embed:nn.Module, tgt_embed: nn.Module, generator):
+    def __init__(
+        self,
+        encoder: nn.Module,
+        decoder: nn.Module,
+        src_embed:nn.Module,
+        tgt_embed: nn.Module,
+        generator: nn.Module
+    ):
         super().__init__()
 
         self.src_embed = src_embed
         self.tgt_embed = tgt_embed
-
         self.encoder = encoder
         self.decoder = decoder
+        self.generator = generator
 
+    def encode(self, src, src_mask):
+        src_vectors = self.src_embed(src)
+        return self.encoder(src_vectors, src_mask)
+ 
+    def decode(self, tgt, memory, src_mask, tgt_mask):
+        tgt_vectors = self.tgt_embed(tgt)
+        return self.decoder( tgt_vectors, src_mask, tgt_mask,memory)
+        
+    def forward(self, src, tgt, src_mask, tgt_mask):
+        memory = self.encode(src, src_mask)
+        decoder_output = self.decode(tgt, memory, src_mask, tgt_mask)
+        return self.generator(decoder_output)
 
-    def forward():
-        pass
+        
