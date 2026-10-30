@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.functional as F
-from jaxtyping import Float, jaxtyped, Bool
+from jaxtyping import Float, jaxtyped, Bool, Int
 from beartype import beartype as typechecker
 from einops import rearrange
 from math import sqrt
@@ -103,20 +103,159 @@ class LayerNorm(nn.Module):
         
         return self.a_1 * norm_x + self.b_2
 
+class Embeddings(nn.Module):
+    def __init__(self, vocab: int, d_model: int):
+        super(Embeddings, self).__init__()
 
-def clone(module: nn.Linear, N: int)-> nn.ModuleList:
+        self.lut = nn.Embedding(vocab, d_model)
+        self.d_model = d_model
+
+    @jaxtyped(typechecker=typechecker)
+    def forward(
+        self, 
+        x: Int[torch.Tensor, "batch seq_len"]
+    )-> Float[torch.Tensor, "batch seq_len d_model"]:
+        return self.lut(x) * sqrt(self.d_model)
+    
+
+
+def clones(module: nn.Linear, N: int)-> nn.ModuleList:
     return nn.ModuleList([copy.deep_copy(module) for _ in range(N)])
 
-
 class TransformerEncoderLayer(nn.Module):
-    pass
 
+    def __init__(self,n_heads: int, d_model: int,d_ff: int ,dropout:float = 0.1 ):
+        super().__init__()
+
+        self.dropout = dropout
+        
+        self.self_attn = MultiHeadedAttention(num_heads=n_heads, embed_dim=d_model)
+        self.norm1 = LayerNorm(d_model)
+        self.norm2 = LayerNorm(d_model)
+        self.feed_forward = nn.Sequential(
+            nn.Linear(d_model, d_ff),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_ff, d_model)
+        )
+
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+
+
+    @jaxtyped(typechecker=typechecker)
+    def forward( 
+            self, 
+            x: Float[torch.Tensor, "batch seq_len d_model"],
+            mask: Float[torch.Tensor, "batch seq_len seq_len"] | None = None
+        ) -> Float[torch.Tensor, "batch seq_len d_model"]:
+        
+        x_norm = self.norm1(x)
+        attn_out, _ = self.self_attn(x_norm,x_norm,x_norm, attn_mask=mask)
+        x = x + self.dropout1(attn_out)
+
+        x_norm2 = self.norm2(x)
+        ff_out = self.feed_forward(x_norm2)
+        x = x + self.dropout2(ff_out)
+
+        return x
+
+class TransformerEncoder(nn.Module):
+    
+    def __init__(self,layer: nn.Module, n_layer:int, d_model, int):
+        super().__init__()
+
+        self.layers = clones(layer,n_layer)
+        self.norm = LayerNorm(d_model)
+
+    def forward(
+        self,
+        x: Float[torch.Tensor, "batch seq_len d_model"], 
+        mask: Float[torch.Tensor, "batch seq_len seq_len"] | None = None
+    )->Float[torch.Tensor, "batch seq_len d_model"]:    
+        for layer in self.layers:
+            x = layer(x, mask)
+        return self.norm(x)
 
 class TransformerDecoderLayer(nn.Module):
-    pass
 
+    def __init__(self, n_heads: int, d_model: int, d_ff: int, dropout: float = 0.1):
+
+        super().__init__()
+        
+        self.norm_1 = LayerNorm(d_model)
+        self.norm_2 = LayerNorm(d_model)
+        self.norm_3 = LayerNorm(d_model)
+
+        self.self_attn = MultiHeadedAttention(n_heads, d_model, dropout)
+        self.cross_attn = MultiHeadedAttention(n_heads, d_model, dropout)
+        self.feed_forward = nn.Sequential(
+            nn.Linear(d_model, d_ff),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_ff, d_model)
+        )
+
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
+
+        self.size = d_model
+
+    @jaxtyped(typechecker=typechecker)
+    def forward(
+        self,
+        x: Float[torch.Tensor, "batch tgt_len d_model"],
+        src_mask: Bool[torch.Tensor, 'batch src_len src_len'], 
+        tgt_mask: Bool[torch.Tensor, 'batch tgt_len tgt_len'], 
+        memory: Float[torch.Tensor, 'batch src_len d_model']
+    )->Float[torch.Tensor, "batch tgt_len d_model"]:
+
+        x_norm = self.norm_1(x)
+        attn_out_1, _ = self.self_attn(x_norm,x_norm,x_norm, tgt_mask)
+        x = x + self.dropout1(attn_out_1)
+
+        x_norm2 = self.norm_2(x)
+        attn_out_2, _ = self.cross_attn(x_norm2, memory, memory, src_mask)
+        x = x + self.dropout2(attn_out_2)
+
+        x_norm3 = self.norm_3(x)
+        ff = self.feed_forward(x_norm3)
+        x = x + self.dropout3(ff)
+
+        return x
+
+class TransformerDecoder(nn.Module):
+
+    def __init__(self, layer: nn.Module, n_layers: int):
+
+        super().__init__()
+        self.layers = clones(layer, n_layers)
+        self.norm = LayerNorm(layer.size)
+
+    @jaxtyped(typechecker=typechecker)
+    def forward(self,
+        x: Float[torch.Tensor, "batch tgt_len d_model"],
+        src_mask: Bool[torch.Tensor, "batch 1 src_len src_len"] | None,
+        tgt_mask: Bool[torch.Tensor, "batch 1 tgt_len tgt_len"] | None,
+        memory: Float[torch.Tensor, "batch src_len d_model"]
+    )->Float[torch.Tensor, "batch tgt_len d_model"]:
+        for layer in self.layers:
+            x = layer(x, src_mask, tgt_mask, memory)
+
+        return self.norm(x)
+        
 class NmtTransformer(nn.Module):
-    pass
+
+    def __init__(self, encoder: nn.Module, decoder: nn.Module, src_embed:nn.Module, tgt_embed: nn.Module, generator):
+        super().__init__()
+
+        self.src_embed = src_embed
+        self.tgt_embed = tgt_embed
+
+        self.encoder = encoder
+        self.decoder = decoder
 
 
-
+    def forward():
+        pass
