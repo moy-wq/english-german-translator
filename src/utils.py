@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 from jaxtyping import jaxtyped, Float, Int
 from beartype import beartype as typecheker
-import numpy as np
 from math import sqrt
+from typing import Tuple
 
 class CrossEntropyLoss(nn.Module):
 
@@ -36,7 +36,12 @@ class CrossEntropyLoss(nn.Module):
 
 class Adam(torch.optim.Optimizer):
 
-    def __init__(self,params, lr=1e-3, betas=(0.9, 0.99) ,eps=1e-9):
+    def __init__(self,
+                params: Float[torch.Tensor, "batch seq_len d_model"],
+                lr: float = 1e-3,
+                betas: Tuple[float, float]=(0.9, 0.99),
+                eps:float = 1e-9
+        ):
 
         super().__init__()
 
@@ -47,13 +52,16 @@ class Adam(torch.optim.Optimizer):
         if eps < 0.0:
             raise ValueError("Invalid epsilon value")
 
-        self.defaults = dict(lr=lr, betas=betas, eps=eps)
-        
-    def step(self, closure=None):
+        defaults = dict(lr=lr, betas=betas, eps=eps)
+        super().__init__(params=params, defaults=defaults)
+
+    @torch.no_grad()
+    def step(self, closure=None)-> None:
         loss = None
 
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
         for group in self.param_groups:
             lr = group("lr")           
@@ -85,4 +93,5 @@ class Adam(torch.optim.Optimizer):
 
                 p.addcdiv_(exp_avg, denom, value=-step_size)
         
-        return  
+        return loss
+    
